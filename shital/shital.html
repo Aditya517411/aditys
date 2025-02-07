@@ -1,0 +1,127 @@
+<link rel="stylesheet" href="style.css">
+
+<canvas id="glcanvas"></canvas>
+  <script id="vertex-shader" type="x-shader/x-vertex">
+    attribute vec2 a_position;
+    void main() {
+      gl_Position = vec4(a_position, 0.0, 1.0);
+    }
+  </script>
+<script id="fragment-shader" type="x-shader/x-fragment">
+#ifdef GL_ES
+precision mediump float;
+#endif
+
+uniform float u_time;
+uniform vec2 u_resolution;
+
+float oscillate(float time, float minVal, float maxVal) {
+    float sineWave = sin(time);
+    float normalizedSine = (sineWave + 1.0) / 2.0;
+    return mix(minVal, maxVal, normalizedSine);
+}
+
+vec3 palette(float t) {
+    vec3 a = vec3(0.5, 0.5, 0.5);
+    vec3 b = vec3(0.5, 0.5, 0.5);
+    vec3 c = vec3(1.0, 1.0, 1.0);
+    vec3 d = vec3(0.1, 0.3, 0.3 );
+    return a + b * cos(6.28318 * (c * t + d));
+}
+float hash(vec2 p) {
+    return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123);
+}
+float noise(vec2 p) {
+    vec2 i = floor(p);
+    vec2 f = fract(p);
+    vec2 u = f * f * (3.0 - 2.0 * f);
+    
+    return mix(mix(hash(i + vec2(0.0, 0.0)), hash(i + vec2(1.0, 0.0)), u.x),
+               mix(hash(i + vec2(0.0, 1.0)), hash(i + vec2(1.0, 1.0)), u.x),
+               u.y);
+}
+
+vec2 warp(vec2 p) {
+    vec2 offset = vec2(noise(p * 3.0), noise(p * 3.0));
+    return p + offset;
+}
+
+vec2 rotate(vec2 pos, float angle) {
+    float cosAngle = cos(angle);
+    float sinAngle = sin(angle);
+    mat2 rotationMatrix = mat2(cosAngle, -sinAngle, sinAngle, cosAngle);
+    return rotationMatrix * pos;
+}
+
+vec3 getRayDirection(vec2 uv, vec3 camPos, vec3 lookAt, float fov) {
+    vec3 forward = normalize(lookAt - camPos);
+    vec3 right = normalize(cross(vec3(0.0, 1.0, 0.0), forward));
+    vec3 up = cross(forward, right);
+    
+    vec3 dir = forward + uv.x * right * fov + uv.y * up * fov;
+    return normalize(dir);
+}
+
+float sdfSpiral(vec3 p, float twists) {
+    float angle = atan(p.y, p.x) * twists;
+    float radius = length(p.xy) * oscillate(u_time/10.0, 0.0, 1.0);
+    float distanceFromOrigin = length(p.xy);
+    float armAngle = angle + sin(distanceFromOrigin * oscillate(u_time/10.0, 1.0, 200.0) + u_time) * oscillate(u_time/10.0, 1.0, 5.0);
+    p.xy = rotate(p.xy, -u_time * 0.5);
+    p.xy += warp(p.xy);
+
+    vec3 helixPoint = vec3((radius * cos(armAngle)), (radius * sin(armAngle)), 0.0);
+    
+    return length(p - helixPoint) - 0.07;
+}
+
+float rayMarch(vec3 ro, vec3 rd, float pitch, float twists) {
+    float t = 0.0;
+    float maxDist = 200.0;
+    float hitThreshold = 0.03;
+    for (int i = 0; i < 200; i++) {
+        vec3 p = ro + rd * t;
+        float dist = sdfSpiral(p, twists);
+        
+        if (dist < hitThreshold) {
+            return t;
+        }
+        t += max(dist * 0.05, 0.003);
+        if (t > maxDist) break;
+    }
+    return maxDist;
+}
+
+vec3 calculateCameraPosition(float time) {
+    float xPos = 0.0;
+    float yPos = 0.0;
+    float zPos = -0.11;
+
+    return vec3(xPos, yPos, zPos);
+}
+
+
+void main() {
+    vec2 uv = (gl_FragCoord.xy / u_resolution.xy) * 2.0 - 1.0;
+    uv.x *= u_resolution.x / u_resolution.y;
+
+    vec3 camPos = calculateCameraPosition(u_time / 4.0);
+    vec3 lookAt = vec3(.0, 0.0, 1.0);
+
+    vec3 rayDir = getRayDirection(uv, camPos, lookAt, 1.5);
+    float pitch = 1.0;
+    float twists = 15.0;
+
+    float dist = rayMarch(camPos, rayDir, pitch, twists);
+    vec3 p = camPos + rayDir * dist;
+    float cameraToPointDist = length(camPos - p);
+
+    vec3 color = vec3(0.0);
+    if (dist < 200.0) {
+        color = palette(exp(length(p) * p.z) * 150.0 + u_time/20.0);
+    }
+    gl_FragColor = vec4(color, 1.0);
+}
+</script>
+
+<script src="sd.js"></script>
